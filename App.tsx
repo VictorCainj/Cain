@@ -26,8 +26,23 @@ const App: React.FC = () => {
         setCurrentUser(user);
         setRoute('app');
     };
+    
+    const handleGuestLogin = () => {
+        const guestUser: User = {
+            username: 'Visitante',
+            email: `guest_${Date.now()}`,
+            password: '',
+        };
+        handleLoginSuccess(guestUser);
+    };
 
     const handleLogout = () => {
+        if (currentUser && currentUser.username === 'Visitante') {
+            const guestHistoryKey = `shoppingHistory_${currentUser.email}`;
+            const guestImageCacheKey = `imageCache_${currentUser.email}`;
+            localStorage.removeItem(guestHistoryKey);
+            localStorage.removeItem(guestImageCacheKey);
+        }
         localStorage.removeItem('currentUser');
         setCurrentUser(null);
         setRoute('login');
@@ -37,9 +52,9 @@ const App: React.FC = () => {
         return <ShoppingApp currentUser={currentUser} onLogout={handleLogout} />;
     }
     if (route === 'register') {
-        return <RegisterPage onRegisterSuccess={handleRegisterSuccess} onSwitchToLogin={() => setRoute('login')} />;
+        return <RegisterPage onRegisterSuccess={handleRegisterSuccess} onSwitchToLogin={() => setRoute('login')} onGuestLogin={handleGuestLogin} />;
     }
-    return <LoginPage onLoginSuccess={handleLoginSuccess} onSwitchToRegister={() => setRoute('register')} />;
+    return <LoginPage onLoginSuccess={handleLoginSuccess} onSwitchToRegister={() => setRoute('register')} onGuestLogin={handleGuestLogin} />;
 };
 
 export default App;

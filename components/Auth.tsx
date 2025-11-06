@@ -21,7 +21,7 @@ const AuthFormContainer: React.FC<{ title: string; subtitle: string; children: R
     </div>
 );
 
-export const LoginPage: React.FC<{ onLoginSuccess: (user: User) => void; onSwitchToRegister: () => void; }> = ({ onLoginSuccess, onSwitchToRegister }) => {
+export const LoginPage: React.FC<{ onLoginSuccess: (user: User) => void; onSwitchToRegister: () => void; onGuestLogin: () => void; }> = ({ onLoginSuccess, onSwitchToRegister, onGuestLogin }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -54,11 +54,19 @@ export const LoginPage: React.FC<{ onLoginSuccess: (user: User) => void; onSwitc
             <p className="text-center text-sm mt-6 text-slate-600">
                 Não tem uma conta? <button onClick={onSwitchToRegister} className="font-semibold text-slate-800 hover:underline">Cadastre-se</button>
             </p>
+            <div className="relative flex py-5 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-4 text-slate-400 text-xs">ou</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+            <M3Button onClick={onGuestLogin} variant="outlined" className="w-full py-3">
+                Continuar como Visitante
+            </M3Button>
         </AuthFormContainer>
     );
 };
 
-export const RegisterPage: React.FC<{ onRegisterSuccess: (user: User) => void; onSwitchToLogin: () => void; }> = ({ onRegisterSuccess, onSwitchToLogin }) => {
+export const RegisterPage: React.FC<{ onRegisterSuccess: (user: User) => void; onSwitchToLogin: () => void; onGuestLogin: () => void; }> = ({ onRegisterSuccess, onSwitchToLogin, onGuestLogin }) => {
     const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -104,6 +112,14 @@ export const RegisterPage: React.FC<{ onRegisterSuccess: (user: User) => void; o
             <p className="text-center text-sm mt-6 text-slate-600">
                 Já tem uma conta? <button onClick={onSwitchToLogin} className="font-semibold text-slate-800 hover:underline">Faça login</button>
             </p>
+            <div className="relative flex py-5 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-4 text-slate-400 text-xs">ou</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+            </div>
+            <M3Button onClick={onGuestLogin} variant="outlined" className="w-full py-3">
+                Continuar como Visitante
+            </M3Button>
         </AuthFormContainer>
     );
 };
