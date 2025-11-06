@@ -1,0 +1,7 @@
+{
+  "description": "Um assistente de compras com IA, comandos de voz, geração de imagens e um chatbot prestativo.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "name": "Copy of "
+}
