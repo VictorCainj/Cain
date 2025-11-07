@@ -5,6 +5,7 @@ export interface ShoppingItem {
     price?: number;
     imageUrl: string | null;
     imageLoading: boolean;
+    category?: string;
 }
 
 export interface User {

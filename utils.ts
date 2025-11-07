@@ -35,3 +35,24 @@ export async function decodeAudioData(
     }
     return buffer;
 }
+
+export function playSuccessSound() {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (!audioContext) return;
+
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    const now = audioContext.currentTime;
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, now);
+
+    gainNode.gain.setValueAtTime(0.2, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+
+    oscillator.start(now);
+    oscillator.stop(now + 0.2);
+}

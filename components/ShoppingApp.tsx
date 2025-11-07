@@ -1,8 +1,18 @@
 import { GoogleGenAI, FunctionDeclaration, Type, Modality, LiveServerMessage } from "@google/genai";
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { M3Button, M3Fab } from "./UI";
 import { ShoppingItem, User, Tab } from "../types";
-import { encode, decode, decodeAudioData } from "../utils";
+import { encode, decode, decodeAudioData, playSuccessSound } from "../utils";
+
+import { Header } from "./shopping/Header";
+import { TabNavigation } from "./shopping/TabNavigation";
+import { ShoppingList } from "./shopping/ShoppingList";
+import { HistoryList } from "./shopping/HistoryList";
+import { ComparisonView } from "./shopping/ComparisonView";
+import { DeleteModal } from "./shopping/DeleteModal";
+import { Notification } from "./shopping/Notification";
+import { ClearAllModal } from "./shopping/ClearAllModal";
+import { EditItemModal } from "./shopping/EditItemModal";
+import { ItemDetailsModal } from "./shopping/ItemDetailsModal";
 
 export const ShoppingApp: React.FC<{ currentUser: User; onLogout: () => void }> = ({ currentUser, onLogout }) => {
   const [activeTab, setActiveTab] = useState<Tab>('list');
@@ -10,8 +20,11 @@ export const ShoppingApp: React.FC<{ currentUser: User; onLogout: () => void }> 
   const [isListening, setIsListening] = useState(false);
   const [history, setHistory] = useState<Record<string, ShoppingItem[]>>({});
   const [imageCache, setImageCache] = useState<Record<string, string>>({});
-  const [comparisonItem, setComparisonItem] = useState<string | null>(null);
   const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
+  const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
+  const [selectedItemForDetails, setSelectedItemForDetails] = useState<ShoppingItem | null>(null);
+  const [isClearAllModalVisible, setIsClearAllModalVisible] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   const liveSession = useRef<any>(null);
@@ -51,17 +64,45 @@ export const ShoppingApp: React.FC<{ currentUser: User; onLogout: () => void }> 
     };
   }, []);
 
+  const showNotification = (message: string) => {
+    setNotification(message);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
   const addItem = useCallback(async (name: string, quantity: number, price?: number) => {
     const normalizedName = name.toLowerCase().trim();
+    const existingItem = shoppingList.find(item => item.name.toLowerCase().trim() === normalizedName);
+
+    if (existingItem) {
+        setShoppingList(prev => prev.map(item => item.id === existingItem.id ? {...item, quantity: item.quantity + quantity} : item));
+        return;
+    }
+
+    let category = 'Outros';
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `Qual é a categoria de supermercado para "${name}"? Responda apenas com a categoria. Ex: Laticínios, Frutas, Higiene.`,
+        });
+        const generatedCategory = response.text.trim();
+        if (generatedCategory) {
+            category = generatedCategory.charAt(0).toUpperCase() + generatedCategory.slice(1);
+        }
+    } catch (e) {
+        console.error("Erro ao buscar categoria:", e);
+    }
+    
     const newItem: ShoppingItem = {
       id: Date.now(),
       name,
       quantity,
       price,
+      category,
       imageUrl: imageCache[normalizedName] || null,
       imageLoading: !imageCache[normalizedName],
     };
     setShoppingList(prev => [...prev, newItem]);
+    playSuccessSound();
 
     if (imageCache[normalizedName]) return;
 
@@ -92,7 +133,7 @@ export const ShoppingApp: React.FC<{ currentUser: User; onLogout: () => void }> 
         )
       );
     }
-  }, [ai.models, imageCache]);
+  }, [ai.models, imageCache, shoppingList]);
 
   const handleConfirmRemove = () => {
     if (itemToDelete) {
@@ -101,17 +142,40 @@ export const ShoppingApp: React.FC<{ currentUser: User; onLogout: () => void }> 
     }
   };
   
+  const handleUpdateItem = (updatedItem: ShoppingItem) => {
+    setShoppingList(prev => prev.map(item => item.id === updatedItem.id ? updatedItem : item));
+    setEditingItem(null);
+    showNotification("Item atualizado com sucesso.");
+  };
+
+  const handleUpdateItemQuantity = (itemId: number, newQuantity: number) => {
+    if (newQuantity <= 0) {
+      setShoppingList(prev => prev.filter(item => item.id !== itemId));
+    } else {
+      setShoppingList(prev => 
+        prev.map(item => 
+          item.id === itemId ? { ...item, quantity: newQuantity } : item
+        )
+      );
+    }
+  };
+
+  const handleClearAll = () => {
+    setShoppingList([]);
+    setIsClearAllModalVisible(false);
+    showNotification("Lista de compras limpa.");
+  };
+  
   const saveList = () => {
-    if(shoppingList.length === 0) return;
+    if(shoppingList.length === 0) {
+        showNotification('Sua lista de compras está vazia.');
+        return;
+    }
     const date = new Date();
     const key = date.toISOString();
     setHistory(prev => ({...prev, [key]: shoppingList}));
     setShoppingList([]);
-    alert('Lista salva com sucesso!');
-  };
-
-  const calculateTotal = () => {
-    return shoppingList.reduce((total, item) => total + (item.price || 0) * item.quantity, 0).toFixed(2);
+    showNotification('Lista salva com sucesso!');
   };
   
   const startListening = async () => {
@@ -223,171 +287,64 @@ export const ShoppingApp: React.FC<{ currentUser: User; onLogout: () => void }> 
       setIsListening(false);
   };
 
-  const getComparisonData = () => {
-    if (!comparisonItem) return [];
-    const data: { date: string; quantity: number; price?: number }[] = [];
-    Object.entries(history).forEach(([date, list]) => {
-      list.forEach(item => {
-        if (item.name.toLowerCase() === comparisonItem.toLowerCase()) {
-          data.push({ date, quantity: item.quantity, price: item.price });
-        }
-      });
-    });
-    return data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const handleToggleListening = () => {
+    isListening ? stopListening() : startListening();
   };
 
-  const uniqueItemsInHistory = [...new Set(Object.values(history).flat().map(item => item.name))];
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'list':
+        return <ShoppingList
+          shoppingList={shoppingList}
+          onSaveList={saveList}
+          onDeleteItem={setItemToDelete}
+          onEditItem={setEditingItem}
+          onViewItemDetails={setSelectedItemForDetails}
+          onClearAllRequest={() => setIsClearAllModalVisible(true)}
+          isListening={isListening}
+          onToggleListening={handleToggleListening}
+          onUpdateItemQuantity={handleUpdateItemQuantity}
+        />;
+      case 'history':
+        return <HistoryList history={history} />;
+      case 'compare':
+        return <ComparisonView history={history} />;
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
-        {itemToDelete && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 fade-in">
-                <div className="bg-white rounded-xl shadow-lg p-6 w-full max-w-sm m-4">
-                    <h3 className="text-lg font-semibold text-slate-800">Confirmar Exclusão</h3>
-                    <p className="text-slate-600 mt-2">
-                        Tem certeza que deseja remover <span className="font-bold">{itemToDelete.name}</span> da sua lista?
-                    </p>
-                    <div className="mt-6 flex justify-end gap-3">
-                        <M3Button variant="text" onClick={() => setItemToDelete(null)}>Cancelar</M3Button>
-                        <M3Button variant="filled" onClick={handleConfirmRemove} className="!bg-red-600 hover:!bg-red-700">
-                            Remover
-                        </M3Button>
-                    </div>
-                </div>
-            </div>
-        )}
-
-        <header className="bg-white shadow-sm sticky top-0 z-20 border-b border-slate-200">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-between items-center py-4">
-                    <h1 className="text-xl font-bold text-slate-900 tracking-tight">Shopping Pro</h1>
-                    <div className="flex items-center gap-4">
-                        <span className="text-sm text-slate-600 hidden sm:block">Olá, {currentUser.username}</span>
-                        <M3Button onClick={onLogout} variant="outlined">Sair</M3Button>
-                    </div>
-                </div>
-            </div>
-        </header>
-
-        <main className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200">
-                <nav className="border-b border-slate-200">
-                    <div className="flex">
-                        {([['list', 'Lista de Compras'], ['history', 'Histórico'], ['compare', 'Comparar']] as [Tab, string][]).map(([tabId, tabName]) => (
-                             <button key={tabId} onClick={() => setActiveTab(tabId)} className={`relative flex-1 p-4 text-sm font-semibold transition-colors duration-200 focus:outline-none ${activeTab === tabId ? 'text-slate-800' : 'text-slate-500 hover:bg-slate-100'}`}>
-                                 {tabName}
-                                 {activeTab === tabId && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-slate-800"></div>}
-                             </button>
-                        ))}
-                    </div>
-                </nav>
-
-                <div className="p-4 md:p-6 min-h-[70vh]">
-                    {activeTab === 'list' && (
-                      <div className="animate-tab-pane">
-                        <div className="space-y-4 max-h-[55vh] overflow-y-auto custom-scrollbar pr-2">
-                          {shoppingList.length === 0 ? (
-                              <div className="text-center py-20 flex flex-col items-center">
-                                <span className="material-symbols-outlined text-6xl text-slate-300">shopping_cart</span>
-                                <p className="text-slate-600 mt-4 font-medium">Sua lista está vazia.</p>
-                                <p className="text-sm text-slate-400 mt-1">Use o botão do microfone para adicionar itens por voz.</p>
-                              </div>
-                          ) : (
-                              shoppingList.map(item => (
-                                <div key={item.id} className="flex items-center bg-white p-4 rounded-xl border border-slate-200 transition-all duration-200 hover:shadow-md hover:border-slate-300">
-                                    <div className="w-16 h-16 bg-slate-100 rounded-lg flex items-center justify-center mr-4 overflow-hidden flex-shrink-0">
-                                        {item.imageLoading ? ( <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-slate-500"></div> ) : item.imageUrl ? (
-                                            <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"/>
-                                        ) : ( <span className="material-symbols-outlined text-slate-400">image</span> )}
-                                    </div>
-                                    <div className="flex-grow grid grid-cols-2 md:grid-cols-3 gap-2 items-center">
-                                        <div className="col-span-2 md:col-span-1">
-                                            <p className="font-bold text-slate-800 capitalize">{item.name}</p>
-                                            <p className="text-xs text-slate-500">
-                                                {item.price ? `R$ ${item.price.toFixed(2)} / un.` : 'Sem preço'}
-                                            </p>
-                                        </div>
-                                        <div className="flex items-center justify-start md:justify-center">
-                                            <p className="text-sm text-slate-600">
-                                                <span className="font-medium">Qtd:</span> {item.quantity}
-                                            </p>
-                                        </div>
-                                        <div className="col-span-2 md:col-span-1 text-left md:text-right">
-                                            <p className="font-semibold text-slate-900">
-                                                {item.price ? `R$ ${(item.price * item.quantity).toFixed(2)}` : 'N/A'}
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <button onClick={() => setItemToDelete(item)} className="ml-4 text-slate-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-full transition-colors" aria-label={`Remover ${item.name}`}>
-                                        <span className="material-symbols-outlined">delete</span>
-                                    </button>
-                                </div>
-                              ))
-                          )}
-                        </div>
-                        {shoppingList.length > 0 && (
-                          <div className="mt-6 pt-4 border-t border-slate-200 flex justify-between items-center">
-                              <M3Button onClick={saveList} variant="filled">Salvar Lista</M3Button>
-                              <p className="text-lg font-semibold">Total: <span className="text-slate-900">R$ {calculateTotal()}</span></p>
-                          </div>
-                        )}
-                        <M3Fab onClick={isListening ? stopListening : startListening} isListening={isListening} />
-                      </div>
-                    )}
-                    {activeTab === 'history' && (
-                      <div className="animate-tab-pane max-h-[65vh] overflow-y-auto custom-scrollbar pr-2">
-                        <h2 className="text-lg font-semibold text-slate-900 mb-4">Histórico de Compras</h2>
-                        {Object.keys(history).length === 0 ? (
-                          <p className="text-center text-slate-500 py-16">Nenhuma lista foi salva ainda.</p>
-                        ) : (
-                          Object.entries(history).sort((a,b) => new Date(b[0]).getTime() - new Date(a[0]).getTime()).map(([date, list]) => (
-                            <div key={date} className="mb-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
-                              <h3 className="font-medium text-slate-800 border-b border-slate-200 pb-2 mb-3">
-                                Compra de {new Date(date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
-                              </h3>
-                              <ul className="space-y-2 text-sm">
-                                {list.map(item => (
-                                  <li key={item.id} className="flex justify-between items-center text-slate-600">
-                                    <span>{item.name} (x{item.quantity})</span>
-                                    {item.price && <span>R$ {(item.price * item.quantity).toFixed(2)}</span>}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                    {activeTab === 'compare' && (
-                      <div className="animate-tab-pane">
-                        <h2 className="text-lg font-semibold text-slate-900 mb-4">Comparação de Preços</h2>
-                        <div className="mb-6">
-                            <label htmlFor="item-select" className="block mb-2 text-sm font-medium text-slate-700">Selecione um item para comparar o histórico:</label>
-                            <select id="item-select" onChange={e => setComparisonItem(e.target.value)} className="bg-white border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5">
-                                <option value="">Escolha um item</option>
-                                {uniqueItemsInHistory.map(item => <option key={item} value={item}>{item}</option>)}
-                            </select>
-                        </div>
-                        {comparisonItem && (
-                          <div className="max-h-[50vh] overflow-y-auto custom-scrollbar pr-2 space-y-2">
-                              {getComparisonData().length > 0 ? getComparisonData().map(({date, quantity, price}) => (
-                                <div key={date} className="bg-slate-50 p-3 rounded-lg flex justify-between items-center border border-slate-200 text-sm">
-                                  <span className="font-medium text-slate-700">{new Date(date).toLocaleDateString('pt-BR')}</span>
-                                  <span className="text-slate-600">Quantidade: {quantity}</span>
-                                  <span className="text-slate-800 font-semibold">
-                                      {price ? `R$${price.toFixed(2)} /un.` : 'Sem preço'}
-                                  </span>
-                                </div>
-                              )) : (
-                                  <p className="text-center text-slate-500 py-10">Nenhum dado de preço encontrado para este item.</p>
-                              )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                </div>
-            </div>
-        </main>
+      <Notification message={notification} />
+      <DeleteModal
+        itemToDelete={itemToDelete}
+        onConfirm={handleConfirmRemove}
+        onCancel={() => setItemToDelete(null)}
+      />
+      <ClearAllModal
+        isOpen={isClearAllModalVisible}
+        onConfirm={handleClearAll}
+        onCancel={() => setIsClearAllModalVisible(false)}
+      />
+      <EditItemModal
+        item={editingItem}
+        onSave={handleUpdateItem}
+        onCancel={() => setEditingItem(null)}
+      />
+      <ItemDetailsModal 
+        item={selectedItemForDetails}
+        onClose={() => setSelectedItemForDetails(null)}
+      />
+      <Header currentUser={currentUser} onLogout={onLogout} />
+      <main className="max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+          <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
+          <div className="p-4 md:p-6 min-h-[70vh]">
+            {renderTabContent()}
+          </div>
+        </div>
+      </main>
     </div>
   );
 };
